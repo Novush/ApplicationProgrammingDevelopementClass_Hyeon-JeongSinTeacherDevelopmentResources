@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Aero Dark — Repo Browser</title>
+<style>
+  :root{
+    --bg1: #031025; /* deep midnight blue */
+    --bg2: #052849; /* slightly lighter */
+    --glass: rgba(255,255,255,0.06);
+    --accent: #0a84ff;
+    --muted: rgba(255,255,255,0.65);
+    --panel-radius: 14px;
+    --shadow: 0 10px 30px rgba(0,0,0,0.6);
+    font-family: -apple-system, 'Segoe UI', Roboto, 'Noto Sans KR', 'Helvetica Neue', Arial;
+  }
+  html,body{height:100%;margin:0;background:linear-gradient(180deg,var(--bg1),var(--bg2));color:#eef2ff}
+  /* subtle noise/gloss to mimic Aero */
+  body::before{
+    content:'';position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse at 10% 10%, rgba(255,255,255,0.02), transparent 8%), radial-gradient(ellipse at 90% 90%, rgba(255,255,255,0.02), transparent 8%);
+  }
+  .wrap{max-width:1100px;margin:36px auto;padding:18px;}
+  header{display:flex;align-items:center;gap:16px}
+  .logo{
+    width:86px;height:86px;border-radius:14px;background:linear-gradient(135deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));box-shadow:inset 0 1px 0 rgba(255,255,255,0.02), 0 6px 18px rgba(0,0,0,0.6);display:flex;flex-direction:column;align-items:center;justify-content:center;
+    backdrop-filter: blur(6px);
+  }
+  .logo h1{margin:0;font-size:14px;letter-spacing:0.6px}
+
+  .controls{flex:1;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .controls input[type=text], .controls input[type=password], .controls button, .controls select{
+    background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.06);color:var(--muted);padding:8px 10px;border-radius:8px;outline:none;min-width:140px
+  }
+  .controls input::placeholder{color:rgba(255,255,255,0.38)}
+  .controls button{cursor:pointer}
+  .go{background:linear-gradient(180deg,var(--accent),#0069d6);color:white;border:none}
+
+  main{margin-top:18px;display:grid;grid-template-columns:360px 1fr;gap:16px}
+  .panel{background:var(--glass);border-radius:var(--panel-radius);padding:12px;box-shadow:var(--shadow);border:1px solid rgba(255,255,255,0.04);backdrop-filter: blur(8px)}
+
+  .left .repo-info{display:flex;flex-direction:column;gap:6px}
+  .path{font-size:13px;color:var(--muted)}
+  .search{margin-top:8px}
+  .search input{width:100%;padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.05);background:transparent;color:var(--muted)}
+
+  .files{margin-top:12px;max-height:66vh;overflow:auto}
+  .entry{display:flex;align-items:center;gap:10px;padding:10px;border-radius:10px;cursor:pointer}
+  .entry:hover{background:linear-gradient(90deg, rgba(255,255,255,0.02), transparent)}
+  .icon{width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.2);font-weight:700}
+  .name{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .meta{font-size:12px;color:rgba(255,255,255,0.55)}
+
+  .viewer{display:flex;flex-direction:column;height:66vh}
+  .viewer .toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .viewer .preview{flex:1;margin-top:8px;background:linear-gradient(180deg, rgba(255,255,255,0.02), transparent);border-radius:10px;padding:10px;overflow:auto}
+  pre{white-space:pre-wrap;font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, 'Roboto Mono', 'Noto Mono', monospace;font-size:13px;color:#e8f0ff}
+
+  .hint{font-size:13px;color:rgba(255,255,255,0.6)}
+  footer{margin-top:14px;font-size:12px;color:rgba(255,255,255,0.45)}
+
+  @media(max-width:900px){main{grid-template-columns:1fr} .left{order:2}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">
+      <h1>AERO</h1>
+      <div style="font-size:11px;color:var(--muted)">Dark • Repo</div>
+    </div>
+    <div class="controls">
+      <input type="text" id="owner" placeholder="Owner (user or org)" />
+      <input type="text" id="repo" placeholder="Repository name" />
+      <select id="branch"><option value="">Default branch (auto)</option></select>
+      <input type="password" id="token" placeholder="(optional) Personal access token for private repo" />
+      <button class="go" id="loadBtn">Load</button>
+      <button id="detectBtn" title="Detect owner/repo from GitHub Pages URL if possible">Detect</button>
+    </div>
+  </header>
+
+  <main>
+    <aside class="panel left">
+      <div class="repo-info">
+        <div class="path" id="repoPath">리포지토리: —</div>
+        <div class="hint">원격 GitHub 리포지토리 내용을 불러옵니다. (공개 repo는 토큰 불필요)</div>
+      </div>
+      <div class="search">
+        <input id="filter" placeholder="파일/디렉토리 검색" />
+      </div>
+      <div class="files" id="fileList"> <div class="hint">Load a repo to see files...</div> </div>
+    </aside>
+
+    <section class="panel viewer">
+      <div class="toolbar">
+        <div>
+          <strong id="currentPath">/</strong>
+          <span class="meta" id="itemCount"></span>
+        </div>
+        <div>
+          <button id="upBtn">Up</button>
+          <button id="rawBtn">Open raw</button>
+        </div>
+      </div>
+      <div class="preview" id="previewArea">
+        <div class="hint">파일을 선택하면 미리보기가 표시됩니다.</div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="hint">Tip: GitHub API rate limit applies (unauthenticated ~60/hr). Private repos need a token. Don't commit tokens into repo.</footer>
+</div>
+
+<script>
+  // --- utility
+  const qs = s=>document.querySelector(s);
+  const ownerInput = qs('#owner');
+  const repoInput = qs('#repo');
+  const tokenInput = qs('#token');
+  const branchSelect = qs('#branch');
+  const fileListEl = qs('#fileList');
+  const previewEl = qs('#previewArea');
+  const repoPathEl = qs('#repoPath');
+  const currentPathEl = qs('#currentPath');
+  const itemCountEl = qs('#itemCount');
+
+  let state = {owner:'',repo:'',branch:'',path:'',tree:[],lastList:[]};
+
+  function setStatusPath(){
+    repoPathEl.textContent = state.owner && state.repo ? `리포지토리: ${state.owner}/${state.repo}` : '리포지토리: —';
+    currentPathEl.textContent = state.path || '/';
+  }
+
+  function apiHeaders(){
+    const headers = { 'Accept': 'application/vnd.github.v3+json' };
+    const tok = tokenInput.value.trim();
+    if(tok) headers['Authorization'] = 'token '+tok;
+    return headers;
+  }
+
+  async function detectFromLocation(){
+    // If hosted on username.github.io/repo or github.io (user site) try to parse
+    const host = location.hostname;
+    const pathParts = location.pathname.split('/').filter(Boolean);
+    if(host.endsWith('github.io') && pathParts.length>=1){
+      const owner = host.split('.')[0];
+      const repo = pathParts[0];
+      ownerInput.value = owner; repoInput.value = repo;
+      alert(`Detected owner=${owner}, repo=${repo}. Click Load.`);
+    } else {
+      alert('자동 감지 실패: GitHub Pages URL 형태가 아닙니다. 수동으로 owner와 repo 입력하세요.');
+    }
+  }
+
+  async function loadBranches(){
+    if(!state.owner||!state.repo) return;
+    const url = `https://api.github.com/repos/${state.owner}/${state.repo}`;
+    try{
+      const r = await fetch(url,{headers:apiHeaders()});
+      if(!r.ok) throw r;
+      const j = await r.json();
+      const defaultBranch = j.default_branch || 'main';
+      branchSelect.innerHTML = `<option value="">Default branch — ${defaultBranch}</option><option value="${defaultBranch}">${defaultBranch}</option>`;
+    }catch(e){
+      console.error(e);branchSelect.innerHTML=`<option value="">(failed to fetch branches)</option>`;
+    }
+  }
+
+  async function listPath(path=''){
+    if(!state.owner||!state.repo){alert('owner/repo를 입력하세요.');return}
+    state.path = path || '';
+    setStatusPath();
+    fileListEl.innerHTML = '<div class="hint">loading…</div>';
+    const branch = branchSelect.value || '';
+    const apiPath = `https://api.github.com/repos/${state.owner}/${state.repo}/contents/${encodeURIComponent(state.path)}` + (branch?`?ref=${encodeURIComponent(branch)}`:'');
+    try{
+      const r = await fetch(apiPath,{headers:apiHeaders()});
+      if(r.status===404){ fileListEl.innerHTML=`<div class="hint">경로를 찾을 수 없습니다 (404)</div>`; return }
+      if(!r.ok) throw r;
+      const j = await r.json();
+      // j can be array (dir) or object (file)
+      if(Array.isArray(j)){
+        state.lastList = j;
+        renderList(j);
+      } else {
+        // it's a file object -> preview directly
+        state.lastList = [j];
+        renderList([j]);
+        previewFile(j);
+      }
+    }catch(err){
+      console.error(err);
+      fileListEl.innerHTML = `<div class="hint">로드 실패 — ${err && err.status?err.status:err}</div>`;
+    }
+  }
+
+  function renderList(list){
+    fileListEl.innerHTML='';
+    const filter = qs('#filter').value.trim().toLowerCase();
+    const filtered = list.filter(it=> it.name.toLowerCase().includes(filter));
+    itemCountEl.textContent = `${filtered.length} items`;
+    filtered.sort((a,b)=> (a.type===b.type)? a.name.localeCompare(b.name): (a.type==='dir'? -1:1));
+    for(const it of filtered){
+      const el = document.createElement('div'); el.className='entry';
+      const icon = document.createElement('div'); icon.className='icon';
+      icon.textContent = it.type==='dir'? '📁' : '📄';
+      const name = document.createElement('div'); name.className='name'; name.textContent = it.name;
+      const meta = document.createElement('div'); meta.className='meta'; meta.textContent = it.type;
+      el.appendChild(icon); el.appendChild(name); el.appendChild(meta);
+      el.addEventListener('click', ()=>{
+        if(it.type==='dir'){
+          // navigate deeper
+          const newPath = state.path? `${state.path}/${it.name}`:it.name;
+          listPath(newPath);
+        } else {
+          previewFile(it);
+        }
+      });
+      fileListEl.appendChild(el);
+    }
+  }
+
+  async function previewFile(fileObj){
+    currentPathEl.textContent = (state.path? `${state.path}/` : '/') + fileObj.name;
+    previewEl.innerHTML = '<div class="hint">미리보기 로딩…</div>';
+    if(fileObj.download_url){
+      try{
+        const r = await fetch(fileObj.download_url,{headers:apiHeaders()});
+        if(!r.ok) throw r;
+        const ct = r.headers.get('content-type')||'';
+        if(ct.startsWith('image/')){
+          const blob = await r.blob();
+          const url = URL.createObjectURL(blob);
+          previewEl.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%"><img src='${url}' style='max-width:100%;max-height:100%;border-radius:8px' alt='${fileObj.name}'/></div>`;
+        } else if(ct.includes('application/pdf')){
+          const blob = await r.blob();
+          const url = URL.createObjectURL(blob);
+          previewEl.innerHTML = `<iframe src='${url}' style='width:100%;height:100%;border:none;border-radius:8px'></iframe>`;
+        } else {
+          const text = await r.text();
+          const safeText = text.replace(/</g,'&lt;');
+          previewEl.innerHTML = `<pre>${safeText}</pre>`;
+        }
+        qs('#rawBtn').onclick = ()=>window.open(fileObj.download_url,'_blank');
+      }catch(e){
+        console.error(e);
+        previewEl.innerHTML = `<div class="hint">프리뷰 실패 — ${e}</div>`;
+      }
+    } else {
+      previewEl.innerHTML = '<div class="hint">파일에 대한 다운로드 URL이 없습니다.</div>';
+    }
+  }
+
+  // UI wiring
+  qs('#loadBtn').addEventListener('click', async ()=>{
+    state.owner = ownerInput.value.trim(); state.repo = repoInput.value.trim();
+    if(!state.owner||!state.repo){alert('owner와 repo를 입력하세요.');return}
+    setStatusPath();
+    await loadBranches();
+    await listPath('');
+  });
+  qs('#detectBtn').addEventListener('click', detectFromLocation);
+  qs('#filter').addEventListener('input', ()=>renderList(state.lastList || []));
+  qs('#upBtn').addEventListener('click', ()=>{
+    if(!state.path) return; const parts = state.path.split('/'); parts.pop(); listPath(parts.join('/'));
+  });
+  // raw button default
+  qs('#rawBtn').addEventListener('click', ()=>{
+    alert('파일 선택 후 Raw 열기 버튼을 사용하세요.');
+  });
+
+  // try to auto-fill owner/repo from meta if present
+  (function tryAutoDetectFromMeta(){
+    const metaRepo = document.querySelector('meta[name="repo"]');
+    if(metaRepo){
+      const [o,r] = metaRepo.content.split('/'); if(o&&r){ownerInput.value=o;repoInput.value=r}
+    }
+  })();
+
+  // helpful: press Enter in repo input to load
+  repoInput.addEventListener('keydown', e=>{ if(e.key==='Enter') qs('#loadBtn').click(); });
+
+  // small instruction: If hosting in repo root (GitHub Pages), owner/repo detect may work
+</script>
+
+</body>
+</html>
